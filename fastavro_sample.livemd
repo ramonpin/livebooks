@@ -1,0 +1,136 @@
+<!-- livebook:{"autosave_interval_s":null} -->
+
+# Fastavro sample livebook
+
+```elixir
+Mix.install([:fastavro])
+
+schema_json = "{
+  \"type\": \"record\",
+  \"name\": \"person\",
+  \"fields\" : [
+    {\"name\": \"name\",  \"type\": \"string\"},
+    {\"name\": \"age\",   \"type\": \"int\"},
+    {\"name\": \"score\", \"type\": \"double\"}
+  ]
+}"
+
+{:ok, schema} = FastAvro.read_schema(schema_json)
+```
+
+## Description
+
+This library implements some fast avro access functions to be used in conjuction with avro_ex or schema_avro libraries.
+
+It just contains some convenience functions useful when having high amount of avro records to process. It allows faster access than the pure elixir libraries for use cases like:
+
+* You need only to read one or a small amount of fields from the avro data but no modify it. As an example you just need to retrieve some time field to use it as partitioning value in your destination system.
+
+* You want to simplify the message by extracting some fields and reencode with a diferent schema.
+
+To obtain that speed gain, FastAvro uses a rust wrapper arround the apache-avro for rust library. It only supports 'record' type at first level of the schema and only primitive types 'string', 'int', 'long' and 'double' as field types.
+
+```json
+{
+  "type": "record",
+  "name": "person",
+  "fields" : [
+    {"name": "name", "type": "string"},
+    {"name": "age", "type": "int"},
+    {"name": "score", "type": "double"}
+  ]
+}
+```
+
+## Functions
+
+### create_msg(map, schema)
+
+`@spec create_msg(map(), schema()) :: {:ok, avro_record()} | {:error, atom()}`
+
+Creates a new avro record from a map of field names as string binaries and values compatible with the given schema.
+
+All mandatory fields must be provided and the asociated values must correctly typed.
+
+#### Parameters
+
+* map: an elixir map with fields to be populated
+* schema: a schema() reference for the record format
+
+#### Returns
+
+* {:ok, avro_record}: an avro_record() reference already populated and ready to be encoded.
+* {:error, :wrong_type}: if the schema contains an unknown data type.
+
+```elixir
+{:ok, record} =
+  FastAvro.create_msg(
+    %{
+      "name" => "John",
+      "age" => 25,
+      "score" => 5.6
+    },
+    schema
+  )
+```
+
+### encode_avro_datum(avro_map, schema)
+
+`@spec encode_avro_datum(map(), schema()) :: {:ok, binary()} | {:error, atom()}`
+
+Encodes avro data from a map using the provided schema. It raw encodes the data without any headers, no schema and no fingerprint.
+
+#### Parameters
+
+* map: elixir map with field names and values to encode
+* schema: a schema() reference compatible with the fields and values in the map.
+
+#### Returns
+
+* {:ok, binary}: binary contains avro representation of the data in the map as described by the schema.
+* {:error, :wrong_type}: the schema contains an unsupported data type
+* {:error, :incompatible_avro_schema}: the schema does not match map contents
+* {:error, :field_not_found}: if map field missing from schema
+
+```elixir
+{:ok, avro_binary} =
+  FastAvro.encode_avro_datum(
+    %{
+      "name" => "John",
+      "age" => 25,
+      "score" => 5.6
+    },
+    schema
+  )
+```
+
+### get_raw_values(avro_binary, schm, names)
+
+`@spec get_raw_values(binary(), schema(), [String.t()]) ::
+  {:ok, map()} | {:error, atom()}`
+
+Gets the values associated with a list of field names from given avro data and schema.
+
+#### Parameters
+
+* avro_binary: valid avro data as a binary
+* schema: a schema() reference compatible with that avro data.
+* names: a list of field names to consult as a strings
+
+#### Returns
+
+* {:ok, map}: a map with field names and values extracted from avro_binary
+* {:error, :not_a_record}: if avro_binary is not an avro record
+* {:error, :field_not_found}: if a name in names is not in the schema If the field does not exists in the avro record you get :field_not_found.
+
+```elixir
+FastAvro.get_raw_values(avro_binary, schema, ["name"])
+```
+
+```elixir
+FastAvro.get_raw_values(avro_binary, schema, ["name", "age"])
+```
+
+```elixir
+FastAvro.get_raw_values(avro_binary, schema, ["name", "age", "gender", "type"])
+```
